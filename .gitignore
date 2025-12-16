@@ -1,0 +1,14 @@
+.env
+venv/
+env/
+.venv/
+
+Presentations/
+
+Output/
+*_cards.csv
+
+__pycache__/
+*.pyc
+
+.DS_Store
