@@ -2,40 +2,92 @@ import os
 import csv
 import re
 
-def ensureOutputFolder():
-    targetFolder = "Output"
+def ensureOutputFolder(baseDir=None):
+    if baseDir is None:
+        baseDir = os.path.dirname(os.path.abspath(__file__))
+    targetFolder = os.path.join(baseDir, "Output")
     if not os.path.exists(targetFolder):
         os.makedirs(targetFolder)
     return targetFolder
 
-def saveToCsv(cardContent, originalFileName, cardType="Cloze"):
+def _isValidCloze(lineItem):
+    return bool(re.search(r"\{\{c\d+::.+?\}\}", lineItem))
+
+def _isValidBasic(lineItem):
+    if "\t" not in lineItem:
+        return False
+    front, back = lineItem.split("\t", 1)
+    return bool(front.strip()) and bool(back.strip())
+
+def _normalizeLineForDedup(lineItem):
+    return re.sub(r"\s+", " ", lineItem).strip().lower()
+
+def cleanCardLines(cardContent, cardType="Cloze"):
+    cardType = (cardType or "Cloze").capitalize()
+    validLines = []
+    seen = set()
+    invalidCount = 0
+    duplicateCount = 0
+
+    for lineItem in cardContent.split("\n"):
+        lineItem = lineItem.strip()
+        if not lineItem:
+            continue
+
+        isValid = _isValidBasic(lineItem) if cardType == "Basic" else _isValidCloze(lineItem)
+        if not isValid:
+            invalidCount += 1
+            continue
+
+        lineKey = _normalizeLineForDedup(lineItem)
+        if lineKey in seen:
+            duplicateCount += 1
+            continue
+
+        seen.add(lineKey)
+        validLines.append(lineItem)
+
+    stats = {
+        "valid": len(validLines),
+        "invalid": invalidCount,
+        "duplicates": duplicateCount,
+    }
+    return validLines, stats
+
+def saveToCsv(cardContent, originalFileName, cardType="Cloze", baseDir=None, tagOverride=None):
     baseName = os.path.splitext(originalFileName)[0]
     outputName = baseName + "_cards.csv"
-    targetFolder = ensureOutputFolder()
+    targetFolder = ensureOutputFolder(baseDir)
     outputPath = os.path.join(targetFolder, outputName)
     
     try:
+        cleanLines, stats = cleanCardLines(cardContent, cardType)
         with open(outputPath, mode='w', newline='', encoding='utf-8-sig') as fileObj:
             csvWriter = csv.writer(fileObj)
-            linesList = cardContent.split("\n")
-            
-            for lineItem in linesList:
-                lineItem = lineItem.strip()
-                if not lineItem:
-                    continue
-                    
+
+            for lineItem in cleanLines:
                 if cardType == "Basic" and "\t" in lineItem:
                     parts = lineItem.split("\t", 1)
-                    csvWriter.writerow([parts[0], parts[1] if len(parts) > 1 else ""])
+                    row = [parts[0], parts[1] if len(parts) > 1 else ""]
+                    if tagOverride:
+                        row.append(tagOverride)
+                    csvWriter.writerow(row)
                 else:
-                    csvWriter.writerow([lineItem])
+                    row = [lineItem]
+                    if tagOverride:
+                        row.append(tagOverride)
+                    csvWriter.writerow(row)
         
         print(f"Saved: {outputPath}")
-        return True
+        print(
+            f"Validation: kept={stats['valid']}, "
+            f"dropped_invalid={stats['invalid']}, dropped_duplicates={stats['duplicates']}"
+        )
+        return True, outputPath, stats
         
     except Exception as errorObj:
         print(f"Write Error: {errorObj}")
-        return False
+        return False, None, {"valid": 0, "invalid": 0, "duplicates": 0}
 
 def parseUserSelection(inputString, totalCount):
     seen = set()
@@ -64,45 +116,78 @@ def parseUserSelection(inputString, totalCount):
     return result
 
 def chunkText(text, maxWords=800):
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n+', text) if p.strip()]
+    if not paragraphs:
+        return [""]
+
     chunks = []
-    currentChunk = []
+    currentChunkParts = []
     currentWordCount = 0
-    
-    for sentence in sentences:
-        sentenceWords = sentence.split()
-        sentenceLen = len(sentenceWords)
-        
-        if currentWordCount + sentenceLen > maxWords and currentChunk:
-            chunks.append(" ".join(currentChunk))
-            currentChunk = []
+
+    for paragraph in paragraphs:
+        paragraphWords = paragraph.split()
+        paragraphLen = len(paragraphWords)
+
+        if paragraphLen > maxWords:
+            sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+            oversizedPart = []
+            oversizedCount = 0
+            for sentence in sentences:
+                sentenceLen = len(sentence.split())
+                if oversizedPart and oversizedCount + sentenceLen > maxWords:
+                    if currentChunkParts:
+                        chunks.append("\n\n".join(currentChunkParts))
+                        currentChunkParts = []
+                        currentWordCount = 0
+                    chunks.append(" ".join(oversizedPart))
+                    oversizedPart = []
+                    oversizedCount = 0
+                oversizedPart.append(sentence)
+                oversizedCount += sentenceLen
+
+            if oversizedPart:
+                if currentWordCount + oversizedCount > maxWords and currentChunkParts:
+                    chunks.append("\n\n".join(currentChunkParts))
+                    currentChunkParts = []
+                    currentWordCount = 0
+                currentChunkParts.append(" ".join(oversizedPart))
+                currentWordCount += oversizedCount
+            continue
+
+        if currentWordCount + paragraphLen > maxWords and currentChunkParts:
+            chunks.append("\n\n".join(currentChunkParts))
+            currentChunkParts = []
             currentWordCount = 0
-        
-        currentChunk.append(sentence)
-        currentWordCount += sentenceLen
-    
-    if currentChunk:
-        chunks.append(" ".join(currentChunk))
-    
+
+        currentChunkParts.append(paragraph)
+        currentWordCount += paragraphLen
+
+    if currentChunkParts:
+        chunks.append("\n\n".join(currentChunkParts))
+
     return chunks if chunks else [""]
 
-def saveCombinedCsv(allCardsData, cardType, outputFileName="combined_cards.csv"):
-    targetFolder = ensureOutputFolder()
+def saveCombinedCsv(allCardsData, cardType, outputFileName="combined_cards.csv", baseDir=None):
+    targetFolder = ensureOutputFolder(baseDir)
     outputPath = os.path.join(targetFolder, outputFileName)
     
     try:
+        aggregateStats = {"valid": 0, "invalid": 0, "duplicates": 0}
         with open(outputPath, mode='w', newline='', encoding='utf-8-sig') as fileObj:
             csvWriter = csv.writer(fileObj)
             
-            for fileName, cardContent in allCardsData:
-                tag = os.path.splitext(fileName)[0]
-                
-                for line in cardContent.split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                        
+            for item in allCardsData:
+                if len(item) == 3:
+                    fileName, cardContent, tag = item
+                else:
+                    fileName, cardContent = item
+                    tag = os.path.splitext(fileName)[0]
+                cleanLines, stats = cleanCardLines(cardContent, cardType)
+                aggregateStats["valid"] += stats["valid"]
+                aggregateStats["invalid"] += stats["invalid"]
+                aggregateStats["duplicates"] += stats["duplicates"]
+
+                for line in cleanLines:
                     if cardType == "Cloze":
                         csvWriter.writerow([line, tag])
                     else:
@@ -112,8 +197,12 @@ def saveCombinedCsv(allCardsData, cardType, outputFileName="combined_cards.csv")
                         csvWriter.writerow([front, back, tag])
         
         print(f"Saved: {outputPath}")
-        return True
+        print(
+            f"Validation: kept={aggregateStats['valid']}, "
+            f"dropped_invalid={aggregateStats['invalid']}, dropped_duplicates={aggregateStats['duplicates']}"
+        )
+        return True, outputPath, aggregateStats
         
     except Exception as e:
         print(f"Write Error: {e}")
-        return False
+        return False, None, {"valid": 0, "invalid": 0, "duplicates": 0}

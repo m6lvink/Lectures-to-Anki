@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 PLACEHOLDER_VALUES = {"your_key_here", "PUT KEY HERE", ""}
 
 def loadApiKey():
-    # Load environment variables from .env file
-    load_dotenv()
+    # Load .env near this script so caller CWD doesnt mattr
+    baseDir = os.path.dirname(os.path.abspath(__file__))
+    envPath = os.path.join(baseDir, ".env")
+    load_dotenv(dotenv_path=envPath)
     
     apiKey = os.environ.get("DEEPSEEK_API_KEY")
     

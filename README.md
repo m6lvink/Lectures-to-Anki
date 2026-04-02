@@ -12,7 +12,7 @@ This tool automates the process of extracting high-yield concepts from lecture s
 1.  **Install Dependencies**
     Open your terminal or command prompt and run:
     ```bash
-    pip install openai pypdf python-pptx python-dotenv
+    pip install -r requirements.txt
     ```
 
 2.  **Project Structure**
@@ -42,11 +42,17 @@ This tool automates the process of extracting high-yield concepts from lecture s
 
 1.  **Prepare Files**
     Place your lecture slides (`.pptx`), documents (`.pdf`), or raw notes (`.txt`) into the `Presentations` folder.
+    If your files are in a different folder, pass it with `-f` (example: `python main.py -f "..\\Presentations"`).
 
 2.  **Run the Tool**
     Execute the main script from your terminal:
     ```bash
     python main.py
+    ```
+
+    For a no-cost estimate pass:
+    ```bash
+    python main.py --dry-run
     ```
 
 3.  **Select Card Type**
@@ -67,16 +73,21 @@ This tool automates the process of extracting high-yield concepts from lecture s
 
 ## Outputs
 
-All generated files are automatically saved in a folder named `Output`.
+All generated files are automatically saved in the project's `Output` folder.
 
 * **File Naming:** If you process `Biology_Lecture_1.pdf`, the output will be `Biology_Lecture_1_cards.csv`.
-* **Format:** The files are standard CSVs with a single column containing the card content.
+* **Format:** CSV columns depend on card mode and tagging options.
+  - Cloze separate output: `Text`
+  - Cloze combined output: `Text,Tag`
+  - Basic separate output: `Front,Back`
+  - Basic combined output: `Front,Back,Tag`
 
 **Example Content (Cloze):**
 ```text
 The {{c1::mitochondria}} is known as the powerhouse of the cell.
 In Python, the {{c1::def}} keyword is used to define a function.
 The {{c1::Treaty of Versailles}} was signed in {{c2::1919}}.
+```
 
 **Example Content (Basic):**
 ```text
@@ -91,4 +102,16 @@ When was the Treaty of Versailles signed?	1919
 * **DeepSeek Thinking Mode:** Optional enhanced generation mode with cost estimation
 * **Batch Processing:** Process multiple files in a single run
 * **Multiple File Formats:** Supports PDF, PPTX, and TXT files
+* **Validation & Dedup:** Drops malformed cards and duplicate lines before export
+* **Run Summary:** Shows chunk success/failure and card-level validation counts
 
+## CLI Flags
+
+```text
+--dry-run            Parse and estimate only (no API requests)
+--max-files N        Limit number of selected files
+--max-chunks N       Limit chunks per file
+--sample N           Randomly sample N files from current selection
+--tag-prefix TEXT    Prefix Anki tags in output rows
+--tag-suffix TEXT    Suffix Anki tags in output rows
+```
