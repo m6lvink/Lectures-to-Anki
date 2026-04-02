@@ -40,7 +40,30 @@ def stripMarkdownFences(text):
     cleaned = re.sub(pattern, '', text, flags=re.MULTILINE)
     return cleaned.strip()
 
-def generateAnkiCards(rawText, apiKey, cardType="Cloze", useThinking=False, client=None, maxRetries=3):
+def _classifyApiError(errorObj):
+    errStr = str(errorObj).lower()
+
+    if "authentication" in errStr or "invalid api key" in errStr or "unauthorized" in errStr:
+        return "auth"
+    if "model" in errStr and "not found" in errStr:
+        return "config"
+    if "bad request" in errStr or "invalid_request_error" in errStr:
+        return "config"
+    if "rate limit" in errStr or "too many requests" in errStr or "429" in errStr:
+        return "rate_limit"
+    if "timeout" in errStr or "timed out" in errStr:
+        return "timeout"
+    if "connection" in errStr or "temporar" in errStr or "service unavailable" in errStr:
+        return "transient"
+    return "unknown"
+
+def _isRetryableError(errorKind):
+    return errorKind in {"timeout", "transient", "rate_limit", "unknown"}
+
+def generateAnkiCards(rawText, cardType="Cloze", useThinking=False, client=None, maxRetries=3):
+    if client is None:
+        return (False, "API client not configured.")
+
     systemPrompt = getSystemPrompt(cardType)
     userMessage = "Here is the material: \n" + rawText
     modelName = "deepseek-reasoner" if useThinking else "deepseek-chat"
@@ -58,9 +81,16 @@ def generateAnkiCards(rawText, apiKey, cardType="Cloze", useThinking=False, clie
                 ],
                 stream=False
             )
-            
-            generatedContent = responseObj.choices[0].message.content
+
+            if not getattr(responseObj, "choices", None):
+                return (False, "API returned no choices.")
+
+            firstChoice = responseObj.choices[0]
+            message = getattr(firstChoice, "message", None)
+            generatedContent = getattr(message, "content", None)
             generatedContent = stripMarkdownFences(generatedContent)
+            if not generatedContent:
+                return (False, "API returned empty content.")
             isSuccess = True
             break
             
@@ -69,21 +99,32 @@ def generateAnkiCards(rawText, apiKey, cardType="Cloze", useThinking=False, clie
             return (False, None)
             
         except Exception as errorObj:
-            errStr = str(errorObj).lower()
-            isTimeout = "timeout" in errStr or "timed out" in errStr
-            
-            if attempt < maxRetries - 1:
+            errorKind = _classifyApiError(errorObj)
+            retryable = _isRetryableError(errorKind)
+
+            if not retryable:
+                if errorKind == "auth":
+                    return (False, "Authentication failed. Check DEEPSEEK_API_KEY.")
+                if errorKind == "config":
+                    return (False, f"Configuration error: {errorObj}")
+                return (False, f"Non-retryable API error: {errorObj}")
+
+            if attempt < maxRetries - 1 and retryable:
                 waitTime = 2 ** (attempt + 1)
-                if isTimeout:
+                if errorKind == "timeout":
                     print(f"Timeout - retrying in {waitTime}s...")
+                elif errorKind == "rate_limit":
+                    print(f"Rate limit hit: retrying in {waitTime}s...")
                 else:
                     print(f"Error - retry {attempt + 1}/{maxRetries} in {waitTime}s...")
                 time.sleep(waitTime)
             else:
-                if isTimeout:
+                if errorKind == "timeout":
                     print(f"Request timed out after {maxRetries} attempts.")
+                elif errorKind == "rate_limit":
+                    print(f"Rate limit persisted after {maxRetries} attempts.")
                 else:
                     print(f"Failed after {maxRetries} attempts: {errorObj}")
-                isSuccess = False
+                return (False, str(errorObj))
 
     return (isSuccess, generatedContent)
