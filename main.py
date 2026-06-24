@@ -40,7 +40,11 @@ def buildTag(fileName, tagPrefix="", tagSuffix=""):
 def getValidFiles(folder):
     if not os.path.exists(folder):
         return []
-    return [f for f in os.listdir(folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS]
+    return sorted(
+        f for f in os.listdir(folder)
+        if os.path.isfile(os.path.join(folder, f))
+        and os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS
+    )
 
 def displayFileMenu(files):
     print("\n--- Available Files ---")
