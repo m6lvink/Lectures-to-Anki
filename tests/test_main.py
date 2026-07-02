@@ -42,6 +42,9 @@ class TestMain(unittest.TestCase):
 
             self.assertEqual(main.getValidFiles(tmpdir), ["a.PDF", "b.txt"])
 
+    def test_parse_user_selection_accepts_all(self):
+        self.assertEqual(main.data_utils.parseUserSelection("all", 3), [0, 1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

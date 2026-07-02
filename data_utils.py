@@ -90,6 +90,9 @@ def saveToCsv(cardContent, originalFileName, cardType="Cloze", baseDir=None, tag
         return False, None, {"valid": 0, "invalid": 0, "duplicates": 0}
 
 def parseUserSelection(inputString, totalCount):
+    if inputString.strip().lower() == "all":
+        return list(range(totalCount))
+
     seen = set()
     result = []
     
