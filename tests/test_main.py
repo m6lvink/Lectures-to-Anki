@@ -42,6 +42,10 @@ class TestMain(unittest.TestCase):
 
             self.assertEqual(main.getValidFiles(tmpdir), ["a.PDF", "b.txt"])
 
+    def test_get_valid_files_returns_empty_for_file_path(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+            self.assertEqual(main.getValidFiles(handle.name), [])
+
     def test_parse_user_selection_accepts_all(self):
         self.assertEqual(main.data_utils.parseUserSelection("all", 3), [0, 1, 2])
 

@@ -38,7 +38,7 @@ def buildTag(fileName, tagPrefix="", tagSuffix=""):
     return "::".join([p for p in parts if p])
 
 def getValidFiles(folder):
-    if not os.path.exists(folder):
+    if not os.path.isdir(folder):
         return []
     return sorted(
         f for f in os.listdir(folder)
